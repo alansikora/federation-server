@@ -1,0 +1,12 @@
+{
+  "scripts": {
+    "server": "SERVER_NAME=federation-0001 nodemon index.js"
+  },
+  "dependencies": {
+    "body-parser": "^1.18.3",
+    "express": "^4.16.3",
+    "mongo": "^0.1.0",
+    "request": "^2.88.0",
+    "request-promise": "^4.2.2"
+  }
+}
