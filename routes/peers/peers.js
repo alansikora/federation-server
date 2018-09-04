@@ -1,94 +1,94 @@
-const { ObjectID } = require("mongodb");
-
-const request = require("request-promise");
 const express = require("express");
 const router = express.Router();
+
+const { requestToPeer } = require("../../utils");
 
 module.exports = app => {
   app.use("/peers", router);
 
-  router.post("/register", async function(req, res) {
+  router.post("/", async function(req, res) {
     const {
-      body: { identifier, host, port, users: peerRawUsers },
+      body: { identifier, host, port, users: usersToRegister },
       db
     } = req;
 
-    console.log(`Attempting to register peer: ${identifier}...`);
+    console.log(`[${identifier}] Attempting to register peer...`);
 
-    // Register peer
-    let peer = await db.collection("peers").findOne({ identifier });
+    await db
+      .collection("peers")
+      .updateOne(
+        { _id: identifier },
+        { $set: { _id: identifier, host, port } },
+        { upsert: true }
+      );
 
-    if (peer) {
-      console.log(`Peer:${identifier} already exists, updating...`);
+    console.log(`[${identifier}] Peer is saved, retrieving...`);
 
-      await db
-        .collection("peers")
-        .updateOne({ identifier }, { $set: { identifier, host, port } });
-    } else {
-      console.log(`Peer:${identifier} is new, creating...`);
+    const peer = await db.collection("peers").findOne({ _id: identifier });
 
-      await db.collection("peers").insertOne({ identifier, host, port });
-    }
+    console.log(`[${identifier}] Upserting users...`);
 
-    peer = await db.collection("peers").findOne({ identifier });
-
-    console.log(`Peer:${identifier}, upserting users...`);
-
-    for (const peerRawUser of peerRawUsers) {
-      peerRawUser.peer = peer;
+    for (const userToRegister of usersToRegister) {
+      userToRegister.peer = peer;
 
       await db
         .collection("users")
         .updateOne(
-          { _id: peerRawUser._id },
-          { $set: peerRawUser },
+          { _id: userToRegister._id },
+          { $set: userToRegister },
           { upsert: true }
         );
     }
 
-    console.log(`Peer:${identifier}, sending users to all other peers...`);
+    console.log(`[${identifier}] Peer registered!`);
 
-    // Get all peer's users
-    const peerUsers = await db
+    // Get all the other peers
+    const destPeers = await db
+      .collection("peers")
+      .find({ _id: { $ne: peer._id } })
+      .toArray();
+
+    console.log(`[${identifier}] Propagating users...`);
+
+    // Get all users to propagate
+    const usersToPropagate = await db
       .collection("users")
       .find({ "peer._id": peer._id })
       .toArray();
 
-    // Send the users to all registered peers
-    const peers = await db
-      .collection("peers")
-      .find({ _id: { $ne: new ObjectID(peer._id) } })
-      .toArray();
-
-    for (const peer of peers) {
+    for (const destPeer of destPeers) {
       try {
-        console.log(
-          `Peer:${identifier}, sending users to ${peer.identifier}...`
-        );
+        console.log(`[${identifier}] Sending users to ${destPeer._id}...`);
 
-        await request({
-          url: `http://${peer.host}:${peer.port}/users`,
-          method: "PUT",
-          json: {
-            users: peerUsers
-          }
+        await requestToPeer(destPeer, "PUT", "/users", {
+          users: usersToPropagate
         });
       } catch (err) {
-        console.log("Error sending to peer", err);
+        console.log(`[${identifier}] Peer:${peer._id} is not available.`);
       }
     }
 
-    console.log(`Getting users from all other peers...`);
+    console.log(`[${identifier}] Users sent!`);
 
-    // Get all the other peer's users
-    const users = await db
+    console.log(
+      `[${identifier}] Retrieving other peer's users and rooms and sending back...`
+    );
+
+    // Get all users to retrieve
+    const usersToRetrieve = await db
       .collection("users")
       .find({ "peer._id": { $ne: peer._id } })
       .toArray();
 
-    console.log(`Peer:${identifier} registered!`);
+    // Get all rooms to retrieve
+    const roomsToRetrieve = await db
+      .collection("rooms")
+      .find({ "peer._id": { $ne: peer._id } })
+      .toArray();
 
-    // Send the peer back
-    res.send({ peer, users });
+    console.log(`[${identifier}] All done!`);
+
+    // Send data back
+    res.send({ peer, users: usersToRetrieve, rooms: roomsToRetrieve });
   });
 };

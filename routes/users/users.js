@@ -1,51 +1,49 @@
-const { ObjectID } = require("mongodb");
-
-const request = require("request-promise");
 const express = require("express");
 const router = express.Router();
+
+const { requestToPeer } = require("../../utils");
 
 module.exports = app => {
   app.use("/users", router);
 
   router.put("/", async function(req, res) {
     const {
-      body: { user, peer: fromPeer },
+      body: { users, peer: sourcePeer },
       db
     } = req;
 
-    user.peer = fromPeer;
+    for (const user of users) {
+      user.peer = sourcePeer;
 
-    await db
-      .collection("users")
-      .updateOne({ _id: user._id }, { $set: user }, { upsert: 1 });
+      await db
+        .collection("users")
+        .updateOne({ _id: user._id }, { $set: user }, { upsert: 1 });
+    }
 
-    console.log(`Attempting to update user from ${fromPeer.identifier}...`);
+    console.log(`[${sourcePeer._id}] Attempting to update user...`);
 
     // Send the user update to all registered peers
-    const peers = await db
+    const destPeers = await db
       .collection("peers")
-      .find({ _id: { $ne: new ObjectID(fromPeer._id) } })
+      .find({ _id: { $ne: sourcePeer._id } })
       .toArray();
 
-    for (const peer of peers) {
+    for (const destPeer of destPeers) {
       try {
-        console.log(
-          `Peer:${fromPeer.identifier}, sending user to ${peer.identifier}...`
-        );
+        console.log(`[${sourcePeer._id}] sending user to ${destPeer._id}...`);
 
-        await request({
-          url: `http://${peer.host}:${peer.port}/user`,
-          method: "PUT",
-          json: {
-            user
-          }
+        await requestToPeer(destPeer, "PUT", "/users", {
+          users
         });
       } catch (err) {
-        console.log("Error sending to peer", err);
+        console.log(
+          `[${sourcePeer._id}] Error sending user to ${destPeer._id}.`,
+          err
+        );
       }
     }
 
-    console.log(`User updated: ${fromPeer.identifier}...`);
+    console.log(`[${sourcePeer._id}] User updated`);
 
     res.send(200);
   });
