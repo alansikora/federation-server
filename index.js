@@ -2,24 +2,15 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const mongoDBMiddleware = require("./middlewares/mongodb");
 
+const { DB_HOST, DB_NAME, PORT } = process.env;
+
 const app = express();
 app.use(bodyParser.json());
-app.use(mongoDBMiddleware("mongodb://localhost:27017", "federation"));
+app.use(mongoDBMiddleware(DB_HOST, DB_NAME));
 
-const router = express.Router();
-
-router.use(function timeLog(req, res, next) {
-  console.log("Time: ", Date.now());
-  next();
-});
-
-require("./routes/messages")(app);
 require("./routes/peers")(app);
 require("./routes/root")(app);
-require("./routes/users")(app);
 
-app.use("/", router);
-
-async function start() {}
-
-app.listen(8080, () => console.log("Federation server - running @ 8080"));
+app.listen(PORT, () =>
+  console.log(`Federation DNS Server - running @ ${PORT}`)
+);
